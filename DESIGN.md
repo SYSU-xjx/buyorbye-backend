@@ -264,7 +264,7 @@ The backend repository's `compose.yaml` starts MySQL only. The service runs thro
 
 ## 12. Team Workflow and Responsibilities
 
-Two members establish the repositories, database baseline, migration conventions, and shared development configuration. The remaining three members build feature modules on top of the reviewed baseline.
+Two members establish the repositories, database baseline, migration conventions, and shared development configuration. The remaining four members build feature modules on top of the reviewed baseline.
 
 Before parallel implementation, the team reviews and accepts:
 

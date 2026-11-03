@@ -1,6 +1,6 @@
 # buy or bye Backend
 
-Spring Boot REST API for the Buy or Bye Android app, backed by MySQL.
+Spring Boot REST API for Buy or Bye purchase proposals, reasoned `BUY` / `NOT_BUY` votes, and weekly rankings, backed by MySQL.
 
 ## Requirements
 
@@ -24,7 +24,9 @@ The Android emulator reaches the service at `http://10.0.2.2:8080`. Never commit
 - Hibernate uses `ddl-auto=validate`; all schema changes belong in versioned Flyway migrations
 - OpenAPI UI is available at `/swagger-ui/index.html`
 
-The initial schema and business API are intentionally left for the team's shared architecture review. Add the first Flyway migration after entities, constraints, permissions, and API contracts are agreed.
+The preliminary schema is in `src/main/resources/db/migration/V1__initial_schema.sql` and must be reviewed by the team before building business APIs. Add follow-up Flyway migrations for schema changes; do not edit a migration after it has been shared or applied.
+
+The shared [system design](DESIGN.md) defines the candidate data model and confirmed voting rules.
 
 ## Team workflow
 

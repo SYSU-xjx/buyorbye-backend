@@ -31,27 +31,7 @@ This uses the same MySQL version and credentials for every group member on macOS
 docker compose up -d mysql
 ```
 
-Compose creates the database and application user from the `MYSQL_*` values in `.env`. The backend runs on your computer and connects to `localhost:3306` using `SPRING_DATASOURCE_*`.
-
-Load `.env` into the environment, then start Spring Boot:
-
-macOS / Linux:
-
-```sh
-set -a && source .env && set +a && ./mvnw spring-boot:run
-```
-
-Windows PowerShell:
-
-```powershell
-Get-Content .env | Where-Object { $_ -match '^[^#].*=' } | ForEach-Object {
-    $name, $value = $_ -split '=', 2
-    Set-Item -Path "Env:$name" -Value $value
-}
-./mvnw.cmd spring-boot:run
-```
-
-Check `http://localhost:8080/actuator/health`; API docs are at `http://localhost:8080/swagger-ui/index.html`.
+The MySQL container creates the database and application user from the `MYSQL_*` values in `.env` on first initialization. Start the backend using the instructions below.
 
 Stop MySQL with `docker compose down`. Database files remain in the `mysql_data` volume. The `MYSQL_*` values are applied only when that volume is first initialized; changing `.env` later does not update an existing database or its accounts. Do not remove the volume unless you intend to delete the local database.
 
@@ -59,7 +39,7 @@ Stop MySQL with `docker compose down`. Database files remain in the `mysql_data`
 
 Install MySQL Server 8.4 using the official installer for [macOS](https://dev.mysql.com/downloads/mysql/) or [Windows](https://dev.mysql.com/downloads/installer/), then start the MySQL service from the installer or operating system service manager. On macOS, the MySQL preference pane can start/stop the service; on Windows, use the Services app and start the MySQL service installed by the installer.
 
-Connect with a MySQL client or MySQL Workbench as an administrator and create the project database and application account. Replace the example password with the same value set in `SPRING_DATASOURCE_PASSWORD` in `.env`:
+Connect with a MySQL client or MySQL Workbench as an administrator and create the application account. The JDBC URL enables `createDatabaseIfNotExist=true`, so the first backend startup creates `buyorbye` and Flyway applies V1 and V2. The application account therefore needs the global MySQL `CREATE` privilege as well as privileges on the project database. Replace the example password with the same value set in `SPRING_DATASOURCE_PASSWORD` in `.env`:
 
 ```sh
 mysql -u root -p
@@ -68,38 +48,37 @@ mysql -u root -p
 If the `mysql` command is not available in the terminal, connect with MySQL Workbench and run the SQL below in its query editor.
 
 ```sql
-CREATE DATABASE IF NOT EXISTS buyorbye
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_0900_ai_ci;
 CREATE USER IF NOT EXISTS 'buyorbye_user'@'localhost'
   IDENTIFIED BY 'local-dev-change-me';
+GRANT CREATE ON *.* TO 'buyorbye_user'@'localhost';
 GRANT ALL PRIVILEGES ON buyorbye.* TO 'buyorbye_user'@'localhost';
 ```
 
-For this option, `SPRING_DATASOURCE_URL` should point to `localhost:3306`, and `SPRING_DATASOURCE_USERNAME` / `SPRING_DATASOURCE_PASSWORD` must match the account created above. The `MYSQL_*` variables are only for Docker Compose and are not read by a separately installed MySQL Server. Run the backend using the platform-specific commands above. Do not start the Docker database at the same time if the local server already uses port `3306`.
+For this option, set `SPRING_DATASOURCE_URL` in `.env` to `localhost:3306` with `createDatabaseIfNotExist=true`; set `SPRING_DATASOURCE_USERNAME` / `SPRING_DATASOURCE_PASSWORD` to the account created above. Spring Boot reads these values from `.env`. The `MYSQL_*` variables are only for Docker Compose and are not read by a separately installed MySQL Server. Do not start the Docker database at the same time if the local server already uses port `3306`.
 
-## Initialize the schema from `init.sql`
+V1 and V2 are the only schema setup files: V1 creates tables and V2 inserts reference data. They do not create a database. Flyway runs them automatically when the backend starts and does not rerun completed migrations on later starts.
 
-Use this option when the team provides an `init.sql` file in this repository's root. That file has not been added yet. It must create the same schema as `src/main/resources/db/migration/V1__initial_schema.sql`; otherwise the Flyway baseline below would incorrectly mark V1 as applied.
+## Start the backend
 
-First create the empty `buyorbye` database and application account using either setup above, and make sure MySQL is running. Do not start the backend before importing the SQL. From macOS/Linux, run in the backend directory:
+Start MySQL first using one of the setup options above. Run the backend from the `buyorbye-backend` directory; Spring Boot imports `.env` from this working directory. On startup, Flyway applies any pending migrations before the application serves requests.
 
-```sh
-set -a && source .env && set +a
-mysql --host=127.0.0.1 --port=3306 --user="$SPRING_DATASOURCE_USERNAME" --password "$MYSQL_DATABASE" < init.sql
-```
+From a terminal:
 
-Enter the application user's password from `.env` when prompted. In MySQL Workbench, select the `buyorbye` schema, open `init.sql`, and execute the script instead.
-
-Because the imported tables do not yet have a Flyway history record, start the backend once with Flyway's baseline options:
+macOS / Linux:
 
 ```sh
-SPRING_FLYWAY_BASELINE_ON_MIGRATE=true SPRING_FLYWAY_BASELINE_VERSION=1 ./mvnw spring-boot:run
+./mvnw spring-boot:run
 ```
 
-Flyway records version `1` as the baseline and skips `V1__initial_schema.sql`, avoiding duplicate table creation. Verify the `flyway_schema_history` table contains a successful `BASELINE` row at version `1`. After this first startup, stop the backend and use the normal startup command without the baseline environment variables.
+Windows PowerShell:
 
-For an empty database, do not import `init.sql` or enable baseline mode: start the backend normally and Flyway will create the schema from V1. Flyway remains enabled in both setups and applies future migrations such as V2 on later starts. It does not rerun completed migrations just because the project was pulled again.
+```powershell
+./mvnw.cmd spring-boot:run
+```
+
+From Android Studio or IntelliJ IDEA, open this backend project, select JDK 17, and run `com.hku.money.MoneyBackApplication`. Set the run configuration's working directory to the `buyorbye-backend` project root so the application can find `.env`.
+
+Verify startup at `http://localhost:8080/actuator/health`; the API documentation is at `http://localhost:8080/swagger-ui/index.html`. If prompted to sign in, use the temporary Spring Security username `user` and the password printed as `Using generated security password:` in the application startup log. This password changes on restart. The `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` values in `.env` are for MySQL, not Swagger UI. Stop the backend with `Ctrl+C` in the terminal or the IDE Stop button.
 
 The Android emulator reaches the service at `http://10.0.2.2:8080`. Never commit `.env`, credentials, tokens, or production data.
 

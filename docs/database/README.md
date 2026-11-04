@@ -336,7 +336,7 @@
 | vote_type | VARCHAR(16) NOT NULL DEFAULT 'BINARY' | BINARY / OPTION | enum | <span class="r r-new">新增</span> | 二元裁决与多选一共用一张表，靠此列区分 |
 | choice | TINYINT UNSIGNED NULL | 1=BUY / 0=NOT_BUY | Boolean | <span class="r r-mod">改</span> | 改为可空：仅 BINARY 模式有值，OPTION 模式必须为 NULL |
 | option_id | BIGINT UNSIGNED NULL | 所选选项 | Long | <span class="r r-new">新增</span> | 投票模式记录"选了 B"；原 `choice TINYINT` 根本存不下 |
-| reason | TEXT NULL | 投票理由 | String | <span class="r r-mod">改</span> | **必须改为可空**：界面"通过/驳回"是一键按钮，无理由输入框，NOT NULL 会让每次点击都报错 |
+| reason | TEXT NOT NULL | 投票理由 | String | <span class="r r-mod">改</span> | 每次投票必须附带理由；API 与服务层也要拒绝空白理由 |
 | reputation_score_snapshot | INT UNSIGNED NOT NULL | 投票时的信誉分 | Integer | <span class="r r-keep">保留</span> | 快照而非实时值，规则调整后历史投票仍可解释 |
 | weight_snapshot | TINYINT UNSIGNED NOT NULL | 投票时的票权 1/2/3 | Integer | <span class="r r-keep">保留</span> | 高信誉用户票权更高，必须在投票瞬间冻结 |
 | client_request_id | CHAR(36) NOT NULL | 客户端幂等 UUID | String | <span class="r r-new">新增</span> | 弱网重试不会投出两票，这是移动端最容易出的 bug |

@@ -1,12 +1,14 @@
 # Database migrations
 
 Flyway runs these files in version order at application startup (`spring.flyway.enabled: true` in
-`application.yml`). The database itself is created by `compose.yaml` through `MYSQL_DATABASE`, so
-migrations never issue `CREATE DATABASE` or `USE` — the same files work against any schema name.
+`application.yml`). Neither migration issues `CREATE DATABASE` or `USE`. Docker Compose initializes
+the database through the MySQL image's `MYSQL_DATABASE` setting. For a separately installed MySQL,
+the JDBC URL uses `createDatabaseIfNotExist=true`; the configured application account must have the
+MySQL `CREATE` privilege for this to work. See the repository README for account setup.
 
 | File | Purpose |
 |---|---|
-| `V1__initial_schema.sql` | Full schema: 30 tables, 38 foreign keys, all `CHECK` constraints |
+| `V1__initial_schema.sql` | Full schema: 30 tables, 45 foreign keys, 34 `CHECK` constraints; minimum voter count defaults to 3 and every vote requires a reason |
 | `V2__seed_reference_data.sql` | Reference data: 16 content tags and 5 plaza channels |
 
 Table-by-table documentation lives in [`docs/database/README.md`](../../../../../docs/database/README.md).

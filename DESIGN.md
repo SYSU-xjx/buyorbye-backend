@@ -108,7 +108,7 @@ stateDiagram-v2
 Confirmed rules:
 
 - The creator chooses a deadline from one hour to seven days after publishing; the default is 24 hours.
-- The creator sets a minimum number of participating voters; the default is 1. For a group proposal, the threshold cannot exceed the number of currently eligible group members other than the creator when published.
+- The creator sets a minimum number of participating voters; the default is 3. For a group proposal, the threshold cannot exceed the number of currently eligible group members other than the creator when published.
 - Eligible users submit a nonblank reason with each vote. Binary voters choose `BUY` or `NOT_BUY`; option voters choose one proposal option. They may change their choice and reason before the deadline, but cannot withdraw a vote. Each change appends a `DecisionVote` event; only that user's latest event for the proposal counts.
 - Group proposals are votable by current group members; plaza proposals are votable by authenticated users. Eligibility is checked when voting. A group member's existing vote remains valid after they leave, but they cannot cast another vote after leaving.
 - The creator is excluded from the voter count and weighted result.

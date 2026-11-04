@@ -346,7 +346,7 @@ CREATE TABLE decision_votes (
   vote_type                 VARCHAR(16)     NOT NULL DEFAULT 'BINARY' COMMENT 'BINARY / OPTION',
   choice                    TINYINT UNSIGNED NULL     COMMENT '1=BUY / 0=NOT_BUY，仅 BINARY',
   option_id                 BIGINT UNSIGNED NULL     COMMENT '所选选项，仅 OPTION',
-  reason                    TEXT            NULL     COMMENT '可空：界面是一键按钮，无理由输入框',
+  reason                    TEXT            NOT NULL COMMENT '每次投票必须填写理由',
   reputation_score_snapshot INT UNSIGNED    NOT NULL COMMENT '投票瞬间的信誉分快照',
   weight_snapshot           TINYINT UNSIGNED NOT NULL COMMENT '投票瞬间的票权 1/2/3',
   client_request_id         CHAR(36)        NOT NULL COMMENT '幂等键，防弱网重复投票',

@@ -24,6 +24,28 @@ import org.testcontainers.junit.jupiter.*;
 @AutoConfigureMockMvc
 @Testcontainers
 class ApiIntegrationTest {
+  static final java.nio.file.Path AVATARS = avatarDirectory();
+
+  static java.nio.file.Path avatarDirectory() {
+    try {
+      return java.nio.file.Files.createTempDirectory("buyorbye-avatar-test-");
+    } catch (java.io.IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
+  }
+
+  @AfterAll
+  static void cleanAvatars() throws Exception {
+    try (var files = java.nio.file.Files.list(AVATARS)) {
+      for (var path : files.toList()) {
+        if (!path.getParent().equals(AVATARS))
+          throw new IllegalStateException("Unexpected test file");
+        java.nio.file.Files.deleteIfExists(path);
+      }
+    }
+    java.nio.file.Files.deleteIfExists(AVATARS);
+  }
+
   @Container static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");
 
   @DynamicPropertySource
@@ -34,6 +56,8 @@ class ApiIntegrationTest {
     r.add("spring.datasource.username", MYSQL::getUsername);
     r.add("spring.datasource.password", MYSQL::getPassword);
     r.add("app.jwt-secret", () -> "test-only-secret-at-least-32-bytes-not-for-production");
+    r.add("app.avatar.storage-dir", AVATARS::toString);
+    r.add("app.avatar.public-base-url", () -> "");
   }
 
   @TestConfiguration
@@ -53,6 +77,8 @@ class ApiIntegrationTest {
   @Autowired jakarta.persistence.EntityManager entityManager;
   @Autowired com.hku.money.auth.service.AuthService auth;
   @Autowired com.hku.money.auth.mapper.AuthMapper authMapper;
+  @Autowired com.hku.money.user.service.AvatarService avatars;
+  @Autowired com.hku.money.user.service.AvatarStorage avatarStorage;
 
   record Login(long id, String access, String refresh) {}
 
@@ -442,6 +468,120 @@ class ApiIntegrationTest {
         time);
     return jdbc.queryForObject(
         "SELECT MAX(id) FROM purchase_proposals WHERE creator_user_id=?", Long.class, owner);
+  }
+
+  byte[] picture(String format) throws Exception {
+    var image = new java.awt.image.BufferedImage(4, 4, java.awt.image.BufferedImage.TYPE_INT_RGB);
+    var out = new java.io.ByteArrayOutputStream();
+    assertThat(javax.imageio.ImageIO.write(image, format, out)).isTrue();
+    return out.toByteArray();
+  }
+
+  JsonNode upload(Login user, org.springframework.mock.web.MockMultipartFile file, int code)
+      throws Exception {
+    var req = multipart("/api/users/me/avatar").file(file);
+    if (user != null) req.header("Authorization", "Bearer " + user.access);
+    var response = mvc.perform(req).andReturn().getResponse();
+    assertThat(response.getStatus()).as(response.getContentAsString()).isEqualTo(code);
+    var envelope = json.readTree(response.getContentAsString());
+    assertThat(envelope.path("code").asInt()).isEqualTo(code);
+    assertThat(envelope.has("data")).isTrue();
+    return envelope.get("data");
+  }
+
+  @Test
+  void avatarUploadStoresPixelsAndUpdatesProfile() throws Exception {
+    var a = account();
+    var file =
+        new org.springframework.mock.web.MockMultipartFile(
+            "file", "../../evil.svg", "text/plain", picture("png"));
+    upload(null, file, 401);
+    var data = upload(a, file, 200);
+    String url = data.path("avatarUrl").asText();
+    assertThat(url).matches("http://localhost/uploads/avatars/[0-9a-f]{32}\\.png");
+    assertThat(request("GET", "/api/users/me", null, a.access, 200).path("avatarUrl").asText())
+        .isEqualTo(url);
+    assertThat(jdbc.queryForObject("SELECT avatar_url FROM users WHERE id=?", String.class, a.id))
+        .isEqualTo(url);
+    String path = java.net.URI.create(url).getPath();
+    var image = mvc.perform(get(path)).andReturn().getResponse();
+    assertThat(image.getStatus()).isEqualTo(200);
+    assertThat(image.getContentType()).isEqualTo("image/png");
+    assertThat(
+            javax.imageio.ImageIO.read(
+                    new java.io.ByteArrayInputStream(image.getContentAsByteArray()))
+                .getWidth())
+        .isEqualTo(4);
+    assertThat(mvc.perform(head(path)).andReturn().getResponse().getStatus()).isEqualTo(200);
+    request("GET", "/uploads/avatars/not-an-image.txt", null, null, 404);
+    assertThatThrownBy(() -> avatarStorage.find("../.env"))
+        .isInstanceOf(com.hku.money.common.ApiException.class);
+
+    var jpeg =
+        upload(
+            a,
+            new org.springframework.mock.web.MockMultipartFile(
+                "file", "photo.jpg", "image/jpeg", picture("jpeg")),
+            200);
+    assertThat(jpeg.path("avatarUrl").asText()).endsWith(".jpg").isNotEqualTo(url);
+    assertThat(request("GET", "/api/users/me", null, a.access, 200).path("avatarUrl").asText())
+        .isEqualTo(jpeg.path("avatarUrl").asText());
+  }
+
+  @Test
+  void invalidAvatarsAndRolledBackUploadsDoNotChangeProfile() throws Exception {
+    var a = account();
+    upload(
+        a,
+        new org.springframework.mock.web.MockMultipartFile(
+            "file", "x.png", "image/png", new byte[0]),
+        400);
+    upload(
+        a,
+        new org.springframework.mock.web.MockMultipartFile(
+            "file",
+            "x.png",
+            "image/png",
+            "not a picture".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+        400);
+    upload(
+        a,
+        new org.springframework.mock.web.MockMultipartFile(
+            "file", "x.gif", "image/gif", picture("gif")),
+        415);
+    upload(
+        a,
+        new org.springframework.mock.web.MockMultipartFile(
+            "file", "x.jpg", "image/jpeg", new byte[5 * 1024 * 1024 + 1]),
+        413);
+    var missing =
+        mvc.perform(multipart("/api/users/me/avatar").header("Authorization", "Bearer " + a.access))
+            .andReturn()
+            .getResponse();
+    assertThat(missing.getStatus()).isEqualTo(400);
+    assertThat(json.readTree(missing.getContentAsString()).path("code").asInt()).isEqualTo(400);
+    long before;
+    try (var files = java.nio.file.Files.list(AVATARS)) {
+      before = files.count();
+    }
+    var transaction =
+        new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+    var valid =
+        new org.springframework.mock.web.MockMultipartFile(
+            "file", "photo.png", "image/png", picture("png"));
+    assertThatThrownBy(
+            () ->
+                transaction.execute(
+                    status -> {
+                      avatars.upload(a.id, valid, "http://localhost");
+                      throw new IllegalStateException("force rollback");
+                    }))
+        .isInstanceOf(IllegalStateException.class);
+    try (var files = java.nio.file.Files.list(AVATARS)) {
+      assertThat(files.count()).isEqualTo(before);
+    }
+    assertThat(jdbc.queryForObject("SELECT avatar_url FROM users WHERE id=?", String.class, a.id))
+        .isNull();
   }
 
   void vote(long proposal, long voter, String time) {

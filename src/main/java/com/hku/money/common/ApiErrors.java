@@ -34,10 +34,21 @@ public class ApiErrors {
     HttpMessageNotReadableException.class,
     ConstraintViolationException.class,
     MissingServletRequestParameterException.class,
+    org.springframework.web.multipart.support.MissingServletRequestPartException.class,
     HandlerMethodValidationException.class
   })
   ResponseEntity<Result<Void>> invalid(Exception e) {
     return error(400, "请求参数不合法");
+  }
+
+  @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+  ResponseEntity<Result<Void>> tooLarge(Exception e) {
+    return error(413, "头像图片不得超过5MB，请求不得超过6MB");
+  }
+
+  @ExceptionHandler(org.springframework.web.multipart.MultipartException.class)
+  ResponseEntity<Result<Void>> invalidMultipart(Exception e) {
+    return error(400, "上传请求格式不正确");
   }
 
   @ExceptionHandler(DataIntegrityViolationException.class)

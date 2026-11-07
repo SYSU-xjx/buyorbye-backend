@@ -15,6 +15,10 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
 
 management:
   endpoints:
@@ -39,6 +43,9 @@ mybatis:
     local-cache-scope: STATEMENT
 
 app:
+  avatar:
+    storage-dir: ${AVATAR_STORAGE_DIR:./uploads/avatars}
+    public-base-url: ${AVATAR_PUBLIC_BASE_URL:}
   jwt-secret: ${JWT_SECRET}
   access-token-seconds: 86400
   refresh-token-days: 30

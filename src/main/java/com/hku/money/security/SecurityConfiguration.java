@@ -3,6 +3,7 @@ package com.hku.money.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hku.money.common.Result;
 import org.springframework.context.annotation.*;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -36,7 +37,11 @@ public class SecurityConfiguration {
         .sessionManagement(c -> c.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
             a ->
-                a.requestMatchers(
+                a.requestMatchers(HttpMethod.GET, "/uploads/avatars/*")
+                    .permitAll()
+                    .requestMatchers(HttpMethod.HEAD, "/uploads/avatars/*")
+                    .permitAll()
+                    .requestMatchers(
                         "/api/auth/register",
                         "/api/auth/login",
                         "/api/auth/refresh",

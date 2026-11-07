@@ -105,6 +105,26 @@ Rankings use `GET /api/rankings` and `/api/rankings/me` with `type=MOST_REJECTED
 and list pagination `page=1&size=20` (maximum size 100). Historical dates select their natural
 period. Votes count once per voter/proposal per period by vote time, including cross-period changes.
 
+### Avatar upload
+
+`POST /api/users/me/avatar` requires a Bearer token and `multipart/form-data` with a `file`
+part. It saves the image and updates the current user's avatar in one operation, returning
+`{ "code": 200, "message": "操作成功", "data": { "avatarUrl": "http://host/uploads/avatars/random.png" } }`.
+There is no need to call the profile PATCH afterward. Images are decoded and re-encoded;
+only PNG/JPEG up to 5MB and 4096 x 4096 pixels are accepted. Invalid files return 400,
+unsupported image formats 415, and oversized uploads 413. File names/MIME types supplied
+by the client are not trusted. `GET /uploads/avatars/{filename}` serves image bytes publicly
+so Android image loaders can display profiles and ranking entries.
+
+Files live under `./uploads/avatars` by default, outside the JAR and excluded from Git.
+`AVATAR_STORAGE_DIR` can select a persistent directory. `AVATAR_PUBLIC_BASE_URL` can set the
+externally reachable backend base URL (including any application context path); if empty,
+the request's scheme/host/context are used. For Android emulator access, use an API base URL
+such as `http://10.0.2.2:8080`; a physical phone needs an address reachable from that phone.
+Use the public base setting behind a reverse proxy. Keep this directory persistent when
+deploying; this is local storage, not object storage. Replacing an avatar retains the old
+file, while a rolled-back upload removes its newly created file.
+
 Run `./mvnw -B verify` (JDK 17 and Docker required) for unit and isolated MySQL 8.4 integration
 tests. Tests use disposable containers, not the development database. Generated logs, reports,
 PDFs and local working notes are excluded from commits.

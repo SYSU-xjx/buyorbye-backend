@@ -135,6 +135,311 @@ class ApiIntegrationTest {
   }
 
   @Test
+  void plazaFiltersAndDetailsRespectPublicationScope() throws Exception {
+    var author = account();
+    var viewer = account();
+    long milkTea = referenceId("channels", "milk-tea");
+    long digital = referenceId("channels", "digital");
+    long food = referenceId("channels", "food");
+    long foodTag = referenceId("tags", "food");
+    jdbc.update("INSERT INTO user_channels(user_id,channel_id) VALUES (?,?)", viewer.id, milkTea);
+    long multiChannel = plazaFixture(author.id, "PLAZA", "OPEN", null, milkTea, digital);
+    long otherChannel = plazaFixture(author.id, "PLAZA", "OPEN", null, food);
+    long draft = plazaFixture(author.id, "PLAZA", "DRAFT", null, milkTea);
+    long withdrawn = plazaFixture(author.id, "PLAZA", "WITHDRAWN", null, milkTea);
+    String invite = UUID.randomUUID().toString().substring(0, 8);
+    jdbc.update("INSERT INTO app_groups(owner_user_id,name,invite_code) VALUES (?,?,?)",
+        author.id, "Private group", invite);
+    long group = jdbc.queryForObject("SELECT id FROM app_groups WHERE invite_code=?", Long.class, invite);
+    long groupProposal = plazaFixture(author.id, "GROUP", "OPEN", group, milkTea);
+    jdbc.update("INSERT INTO proposal_tags(proposal_id,tag_id) VALUES (?,?)", multiChannel, foodTag);
+    jdbc.update("INSERT INTO purchase_proposal_images(proposal_id,image_url,display_order) VALUES (?,?,1)",
+        multiChannel, "https://example.test/milk-tea.jpg");
+
+    String feed = "/api/plaza";
+    request("GET", feed, null, null, 401);
+    assertThat(itemIds(request("GET", feed, null, viewer.access, 200)))
+        .containsSequence(otherChannel, multiChannel)
+        .doesNotHaveDuplicates()
+        .doesNotContain(draft, withdrawn, groupProposal);
+    var mine = request("GET", feed + "?scope=MINE", null, viewer.access, 200);
+    assertThat(itemIds(mine)).containsExactly(multiChannel);
+    assertThat(mine.path("total").asLong()).isEqualTo(1);
+    assertThat(itemIds(request("GET", feed + "?scope=MINE", null, author.access, 200))).isEmpty();
+    assertThat(itemIds(request("GET", feed + "?channelId=" + digital, null, viewer.access, 200)))
+        .contains(multiChannel);
+    assertThat(itemIds(request("GET", feed + "?scope=MINE&channelId=" + digital, null, viewer.access, 200)))
+        .isEmpty();
+    assertThat(itemIds(request("GET", feed + "?scope=MINE&channelId=" + milkTea + "&tagId=" + foodTag,
+        null, viewer.access, 200))).containsExactly(multiChannel);
+    assertThat(itemIds(request("GET", feed + "?scope=MINE&size=1&page=2", null, viewer.access, 200)))
+        .isEmpty();
+    request("GET", feed + "?size=0", null, viewer.access, 400);
+
+    var subscriptions = request("GET", "/api/channels?scope=MINE", null, viewer.access, 200);
+    assertThat(subscriptions).hasSize(1);
+    assertThat(subscriptions.get(0).path("id").asLong()).isEqualTo(milkTea);
+    assertThat(subscriptions.get(0).path("subscribed").asBoolean()).isTrue();
+    assertThat(request("GET", "/api/tags", null, viewer.access, 200)).isNotEmpty();
+    var detail = request("GET", feed + "/" + multiChannel, null, viewer.access, 200);
+    assertThat(detail.path("proposal").path("participationType").asText()).isEqualTo("BINARY");
+    assertThat(detail.path("proposal").path("amount").decimalValue()).isEqualByComparingTo("24.00");
+    assertThat(detail.path("channels")).hasSize(2);
+    assertThat(detail.path("tags").get(0).path("id").asLong()).isEqualTo(foodTag);
+    assertThat(detail.path("images").get(0).asText()).endsWith("milk-tea.jpg");
+    for (long id : List.of(draft, withdrawn, groupProposal)) {
+      request("GET", feed + "/" + id, null, viewer.access, 404);
+    }
+  }
+
+  private long referenceId(String table, String slug) {
+    return jdbc.queryForObject("SELECT id FROM " + table + " WHERE slug=?", Long.class, slug);
+  }
+
+  private List<Long> itemIds(JsonNode page) {
+    List<Long> ids = new ArrayList<>();
+    page.path("items").forEach(item -> ids.add(item.path("id").asLong()));
+    return ids;
+  }
+
+  private long plazaFixture(long creator, String scope, String status, Long groupId, long... channels) {
+    String key = UUID.randomUUID().toString();
+    jdbc.update("""
+        INSERT INTO purchase_proposals(creator_user_id, publication_scope, proposal_status, group_id,
+          item_name, amount, currency, purchase_reason, client_request_id, published_at, deadline_at)
+        VALUES (?, ?, ?, ?, 'Milk tea', 24.00, 'HKD', 'Trying a new flavor', ?,
+          '2026-11-06 10:00:00', '2026-11-07 10:00:00')
+        """, creator, scope, status, groupId, key);
+    long id = jdbc.queryForObject(
+        "SELECT id FROM purchase_proposals WHERE creator_user_id=? AND client_request_id=?",
+        Long.class, creator, key);
+    for (long channel : channels) {
+      jdbc.update("INSERT INTO purchase_proposal_channels(proposal_id,channel_id) VALUES (?,?)", id, channel);
+    }
+    return id;
+  }
+
+  @Test
+  void plazaWatchesAndCommentsUpdateCountsWithoutCastingVotes() throws Exception {
+    var author = account();
+    var viewer = account();
+    long channel = referenceId("channels", "milk-tea");
+    long proposal = plazaFixture(author.id, "PLAZA", "OPEN", null, channel);
+    long draft = plazaFixture(author.id, "PLAZA", "DRAFT", null, channel);
+    String path = "/api/purchase-proposals/" + proposal;
+    String comments = path + "/comments";
+    String watches = path + "/watches";
+    request("PUT", watches, null, null, 401);
+    request("PUT", "/api/purchase-proposals/" + draft + "/watches", null, viewer.access, 404);
+    request("GET", "/api/purchase-proposals/" + draft + "/comments", null, viewer.access, 404);
+
+    var executor = Executors.newFixedThreadPool(2);
+    try {
+      var first = executor.submit(() -> request("PUT", watches, null, viewer.access, 200));
+      var retry = executor.submit(() -> request("PUT", watches, null, viewer.access, 200));
+      for (var result : List.of(first.get(10, TimeUnit.SECONDS), retry.get(10, TimeUnit.SECONDS))) {
+        assertThat(result.path("watching").asBoolean()).isTrue();
+        assertThat(result.path("watchCount").asInt()).isEqualTo(1);
+      }
+    } finally {
+      executor.shutdownNow();
+    }
+    assertThat(request("GET", "/api/plaza/" + proposal, null, viewer.access, 200)
+        .path("proposal").path("watching").asBoolean()).isTrue();
+    for (int attempt = 0; attempt < 2; attempt++) {
+      var result = request("DELETE", watches, null, viewer.access, 200);
+      assertThat(result.path("watching").asBoolean()).isFalse();
+      assertThat(result.path("watchCount").asInt()).isZero();
+    }
+
+    request("POST", comments, "{\"content\":\"  \"}", viewer.access, 400);
+    var root = request("POST", comments, "{\"content\":\" Good idea \"}", viewer.access, 201);
+    long rootId = root.path("id").asLong();
+    assertThat(root.path("content").asText()).isEqualTo("Good idea");
+    assertThat(root.path("ownedByViewer").asBoolean()).isTrue();
+    var reply = request("POST", comments,
+        "{\"content\":\"Thanks!\",\"parentCommentId\":" + rootId + "}", author.access, 201);
+    long replyId = reply.path("id").asLong();
+    assertThat(reply.path("parentCommentId").asLong()).isEqualTo(rootId);
+    request("POST", comments, "{\"content\":\"Nested\",\"parentCommentId\":" + replyId + "}",
+        viewer.access, 400);
+    long otherProposal = plazaFixture(author.id, "PLAZA", "OPEN", null, channel);
+    request("POST", "/api/purchase-proposals/" + otherProposal + "/comments",
+        "{\"content\":\"Wrong thread\",\"parentCommentId\":" + rootId + "}", viewer.access, 400);
+    request("DELETE", comments + "/" + rootId, null, author.access, 403);
+    request("DELETE", comments + "/" + rootId, null, viewer.access, 200);
+    request("DELETE", comments + "/" + rootId, null, viewer.access, 200);
+    var afterDelete = request("GET", comments, null, author.access, 200);
+    assertThat(itemIds(afterDelete)).containsExactly(rootId, replyId);
+    assertThat(afterDelete.path("items").get(0).path("deleted").asBoolean()).isTrue();
+    assertThat(afterDelete.path("items").get(0).path("content").isNull()).isTrue();
+    var detail = request("GET", "/api/plaza/" + proposal, null, author.access, 200).path("proposal");
+    assertThat(detail.path("commentCount").asInt()).isEqualTo(1);
+    assertThat(detail.path("watchCount").asInt()).isZero();
+    assertThat(detail.path("voterCount").asInt()).isZero();
+    assertThat(jdbc.queryForObject(
+        "SELECT COUNT(*) FROM decision_votes WHERE proposal_id=?", Integer.class, proposal)).isZero();
+    request("DELETE", comments + "/" + replyId, null, author.access, 200);
+    assertThat(itemIds(request("GET", comments, null, author.access, 200))).isEmpty();
+  }
+
+  @Test
+  void plazaSubscriptionsAndRandomUseTheSameFiltersAsTheFeed() throws Exception {
+    var author = account();
+    var viewer = account();
+    long milkTea = referenceId("channels", "milk-tea");
+    long digital = referenceId("channels", "digital");
+    String slug = "test-" + UUID.randomUUID();
+    jdbc.update("INSERT INTO tags(slug,name) VALUES (?, 'Random test')", slug);
+    long tag = referenceId("tags", slug);
+    long visible = plazaFixture(author.id, "PLAZA", "OPEN", null, milkTea, digital);
+    long draft = plazaFixture(author.id, "PLAZA", "DRAFT", null, milkTea);
+    long withdrawn = plazaFixture(author.id, "PLAZA", "WITHDRAWN", null, milkTea);
+    for (long id : List.of(visible, draft, withdrawn)) {
+      jdbc.update("INSERT INTO proposal_tags(proposal_id,tag_id) VALUES (?,?)", id, tag);
+    }
+
+    String subscriptions = "/api/channels/subscriptions";
+    String mine = "/api/channels?scope=MINE";
+    String random = "/api/plaza/random?scope=MINE&tagId=" + tag;
+    assertThat(request("GET", random, null, viewer.access, 200).isNull()).isTrue();
+    String channels = "{\"channelIds\":[" + digital + "," + milkTea + "]}";
+    request("PUT", subscriptions, channels, null, 401);
+    request("PUT", subscriptions, channels, viewer.access, 200);
+    var before = jdbc.queryForObject("""
+        SELECT subscribed_at FROM user_channels WHERE user_id=? AND channel_id=?
+        """, LocalDateTime.class, viewer.id, milkTea);
+    request("PUT", subscriptions, "{\"channelIds\":[" + milkTea + "," + digital + "]}",
+        viewer.access, 200);
+    var updated = request("GET", mine, null, viewer.access, 200);
+    assertThat(updated.get(0).path("id").asLong()).isEqualTo(milkTea);
+    assertThat(updated.get(1).path("id").asLong()).isEqualTo(digital);
+    assertThat(jdbc.queryForObject("""
+        SELECT subscribed_at FROM user_channels WHERE user_id=? AND channel_id=?
+        """, LocalDateTime.class, viewer.id, milkTea)).isEqualTo(before);
+    request("PUT", subscriptions, "{\"channelIds\":[" + milkTea + "," + milkTea + "]}",
+        viewer.access, 400);
+    request("PUT", subscriptions, "{\"channelIds\":[" + milkTea + ",99999999]}",
+        viewer.access, 400);
+    assertThat(request("GET", mine, null, viewer.access, 200)).isEqualTo(updated);
+    assertThat(request("GET", mine, null, author.access, 200)).isEmpty();
+
+    assertThat(request("GET", random + "&channelId=" + milkTea, null, viewer.access, 200)
+        .path("id").asLong()).isEqualTo(visible);
+    assertThat(request("GET", random + "&excludeProposalId=" + visible, null, viewer.access, 200)
+        .isNull()).isTrue();
+    request("PUT", subscriptions, "{\"channelIds\":[]}", viewer.access, 200);
+    assertThat(request("GET", mine, null, viewer.access, 200)).isEmpty();
+    assertThat(request("GET", random, null, viewer.access, 200).isNull()).isTrue();
+  }
+
+  @Test
+  void plazaFlowersAndAuthorUpdatesStayOnVisibleProposals() throws Exception {
+    var author = account();
+    var viewer = account();
+    long channel = referenceId("channels", "milk-tea");
+    long proposal = plazaFixture(author.id, "PLAZA", "OPEN", null, channel);
+    long draft = plazaFixture(author.id, "PLAZA", "DRAFT", null, channel);
+    String path = "/api/purchase-proposals/" + proposal;
+    String draftPath = "/api/purchase-proposals/" + draft;
+    request("PUT", path + "/flowers", null, author.access, 403);
+    request("PUT", draftPath + "/flowers", null, viewer.access, 404);
+    for (int attempt = 0; attempt < 2; attempt++) {
+      var result = request("PUT", path + "/flowers", null, viewer.access, 200);
+      assertThat(result.path("sent").asBoolean()).isTrue();
+      assertThat(result.path("flowerCount").asLong()).isEqualTo(1);
+    }
+    var flowers = request("GET", "/api/plaza/" + proposal, null, author.access, 200).path("flowers");
+    assertThat(flowers.path("sent").asBoolean()).isFalse();
+    assertThat(flowers.path("flowerCount").asLong()).isEqualTo(1);
+    assertThat(jdbc.queryForObject(
+        "SELECT receiver_user_id FROM flowers WHERE proposal_id=?", Long.class, proposal))
+        .isEqualTo(author.id);
+
+    String updateBody = "{\"content\":\" Price dropped this morning \"}";
+    request("POST", path + "/updates", updateBody, viewer.access, 403);
+    request("POST", draftPath + "/updates", updateBody, author.access, 404);
+    var update = request("POST", path + "/updates", updateBody, author.access, 201);
+    assertThat(update.path("content").asText()).isEqualTo("Price dropped this morning");
+    var updates = request("GET", path + "/updates", null, viewer.access, 200);
+    assertThat(updates.path("total").asLong()).isEqualTo(1);
+    assertThat(updates.path("items").get(0)).isEqualTo(update);
+    assertThat(jdbc.queryForObject(
+        "SELECT voter_count FROM purchase_proposals WHERE id=?", Integer.class, proposal)).isZero();
+  }
+
+  @Test
+  void plazaShowsOnlyLatestVoteReasonsWithoutChangingVotes() throws Exception {
+    var author = account();
+    var viewer = account();
+    var other = account();
+    long channel = referenceId("channels", "milk-tea");
+    long proposal = plazaFixture(author.id, "PLAZA", "OPEN", null, channel);
+    long draft = plazaFixture(author.id, "PLAZA", "DRAFT", null, channel);
+    String path = "/api/plaza/" + proposal + "/vote-reasons";
+    request("GET", path, null, null, 401);
+    request("GET", "/api/plaza/" + draft + "/vote-reasons", null, viewer.access, 404);
+    for (int i = 0; i < 3; i++) {
+      jdbc.update("""
+          INSERT INTO decision_votes(proposal_id, voter_user_id, choice, reason,
+            reputation_score_snapshot, weight_snapshot, client_request_id, cast_at)
+          VALUES (?,?,?,?,0,1,?,?)
+          """, proposal, i == 2 ? other.id : viewer.id, i == 1 ? 0 : 1,
+          List.of("Original reason", "Revised reason", "Another voter").get(i),
+          UUID.randomUUID().toString(), "2002-01-01 00:00:0" + i);
+    }
+    var first = request("GET", path + "?size=1", null, viewer.access, 200);
+    var second = request("GET", path + "?size=1&page=2", null, viewer.access, 200);
+    assertThat(first.path("total").asLong()).isEqualTo(2);
+    assertThat(first.path("items").get(0).path("reason").asText()).isEqualTo("Another voter");
+    var latest = second.path("items").get(0);
+    assertThat(latest.path("choice").asText()).isEqualTo("NOT_BUY");
+    assertThat(latest.path("reason").asText()).isEqualTo("Revised reason");
+    assertThat(latest.path("ownedByViewer").asBoolean()).isTrue();
+    String detailPath = "/api/plaza/" + proposal;
+    var detail = request("GET", detailPath, null, viewer.access, 200);
+    assertThat(detail.path("myVote")).isEqualTo(latest);
+    assertThat(detail.path("voteTally")).isEqualTo(json.readTree("""
+        [{"choice":"BUY","optionId":null,"voteCount":1},
+         {"choice":"NOT_BUY","optionId":null,"voteCount":1}]
+        """));
+    assertThat(request("GET", detailPath, null, author.access, 200).path("myVote").isNull()).isTrue();
+    assertThat(jdbc.queryForObject(
+        "SELECT COUNT(*) FROM decision_votes WHERE proposal_id=?", Integer.class, proposal)).isEqualTo(3);
+  }
+
+  @Test
+  void plazaTallyCountsOptionVotesByOptionId() throws Exception {
+    var author = account();
+    var viewer = account();
+    long channel = referenceId("channels", "digital");
+    long proposal = plazaFixture(author.id, "PLAZA", "OPEN", null, channel);
+    jdbc.update("""
+        UPDATE purchase_proposals SET participation_type='OPTION_VOTE',
+          item_name=NULL, poll_question='Which one?' WHERE id=?
+        """, proposal);
+    jdbc.update("""
+        INSERT INTO poll_options(proposal_id,option_label,option_text,display_order)
+        VALUES (?,'A','First',1), (?,'B','Second',2)
+        """, proposal, proposal);
+    long selected = jdbc.queryForObject(
+        "SELECT id FROM poll_options WHERE proposal_id=? AND display_order=2", Long.class, proposal);
+    jdbc.update("""
+        INSERT INTO decision_votes(proposal_id, voter_user_id, vote_type, option_id, reason,
+          reputation_score_snapshot, weight_snapshot, client_request_id, cast_at)
+        VALUES (?,?,'OPTION',?,'Second fits',0,1,?,'2002-01-01 00:00:00')
+        """, proposal, viewer.id, selected, UUID.randomUUID().toString());
+    var detail = request("GET", "/api/plaza/" + proposal, null, viewer.access, 200);
+    assertThat(detail.path("proposal").path("participationType").asText()).isEqualTo("OPTION");
+    assertThat(detail.path("options")).hasSize(2);
+    var tally = detail.path("voteTally");
+    assertThat(tally).hasSize(1);
+    assertThat(tally.get(0).path("optionId").asLong()).isEqualTo(selected);
+    assertThat(tally.get(0).path("choice").isNull()).isTrue();
+    assertThat(tally.get(0).path("voteCount").asLong()).isEqualTo(1);
+  }
+
+  @Test
   void authRotationRevocationProfileAndAnonymization() throws Exception {
     var a = account();
     String stored =

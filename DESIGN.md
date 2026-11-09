@@ -257,6 +257,31 @@ Contract conventions:
 
 The team must freeze the first API contract together with the first Flyway migration. Changes after the freeze require a short decision record and notification to affected modules.
 
+### Plaza integration baseline
+
+These endpoints use the existing Bearer login and `{code, message, data}` response. The current plaza rollout requires login for reads and writes. The team still needs to review guest access and detailed blocking rules.
+
+| Method and path | Behavior |
+|---|---|
+| `GET /api/plaza?scope=MINE&channelId=2&tagId=4&page=1&size=20` | Defaults to `scope=ALL`. Channel and tag filters are optional and combine with the scope. `MINE` with zero subscriptions returns an empty page. Each proposal appears once, newest first, with ID breaking timestamp ties. |
+| `GET /api/channels?scope=MINE` | Lists active subscribed channels in the user's order. `ALL` lists all active channels and includes each subscription flag. |
+| `PUT /api/channels/subscriptions` | Saves the current user's ordered `channelIds` list. IDs must be unique and active, with at most 100 entries. An empty array unsubscribes from all channels. Reordering preserves existing subscription timestamps. |
+| `GET /api/tags` | Lists active content tags for category filters. |
+| `GET /api/plaza/random` | Draws one proposal using the same `scope`, `channelId` and `tagId` filters as the feed. Pass `excludeProposalId` to skip the currently displayed proposal. If no proposal matches, `data` is null. |
+| `GET /api/plaza/{id}` | Returns the proposal, channels, tags, images, options, flower state, the viewer's `myVote`, and `voteTally`. Tally buckets count people by binary `choice` or `optionId`, using each person's latest vote. Omitted buckets have zero votes. The feed and detail require a published plaza proposal in an active channel, with status `OPEN`, `SETTLED` or `INSUFFICIENT_PARTICIPATION`. Other proposals return 404 on this route. |
+| `GET /api/plaza/{id}/vote-reasons` | Returns one latest vote and reason per voter for a visible plaza proposal, with `page` and `size`. The greatest vote event ID determines the latest vote. |
+| `PUT /api/purchase-proposals/{id}/watches` and `DELETE /api/purchase-proposals/{id}/watches` | Set or clear the current user's watch. Retries preserve the watch count. |
+| `GET /api/purchase-proposals/{id}/comments` | Lists comments and replies in chronological order with `page` and `size`. A deleted top-level comment remains as an empty placeholder while it has visible replies. |
+| `POST /api/purchase-proposals/{id}/comments` | Creates a comment with a nonblank `content` of at most 1000 characters. An optional `parentCommentId` refers to a visible top-level comment on the same proposal. |
+| `DELETE /api/purchase-proposals/{id}/comments/{commentId}` | Soft-deletes a comment by its author. |
+| `PUT /api/purchase-proposals/{id}/flowers` | Sends one flower to the proposal author. Retries preserve the count. Sending a flower to one's own proposal returns 403. |
+| `GET /api/purchase-proposals/{id}/updates` | Lists the author's additions in chronological order with `page` and `size`. |
+| `POST /api/purchase-proposals/{id}/updates` | Adds a note to a visible proposal, with a nonblank `content` of at most 1000 characters. Only the author can post. |
+
+List responses with pagination use `data.items`, `data.page`, `data.size`, and `data.total`. The plaza detail exposes the same proposal ID, `BINARY` or `OPTION` participation type, and option IDs needed for the shared `/api/purchase-proposals/{id}/votes` route. During voting integration, confirm the vote request and response with the proposal team, then verify that an accepted vote changes `voterCount` in plaza detail and that changing a vote leaves the distinct voter count unchanged.
+
+The plaza ranking entry can call the existing ranking controller at `GET /api/rankings?period=WEEK&type=TOP_JUDGE`. The other weekly categories are `HIGHEST_APPROVED_AMOUNT` and `MOST_REJECTED`.
+
 ## 10. Authentication and Authorization
 
 The first version uses username/password registration and login. Passwords are stored only as BCrypt hashes. JWT signing material is supplied through an environment variable and is never committed. Access tokens are planned to expire after 24 hours. Refresh-token hashes, expiry, device association, and revocation state are stored in `auth_sessions` so sessions can be revoked per device.

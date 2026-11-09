@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hku.money.proposal.mapper.ProposalMapper">
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO purchase_proposals(creator_user_id,participation_type,approval_mode,publication_scope,group_id,item_name,poll_question,amount,currency,purchase_reason,alternative_product_tip,settlement_mode,minimum_voter_count,client_request_id,created_at,updated_at)
+    VALUES(#{creatorUserId},#{participationType},#{approvalMode},#{publicationScope},#{groupId},#{itemName},#{pollQuestion},#{amount},#{currency},#{purchaseReason},#{alternativeProductTip},#{settlementMode},#{minimumVoterCount},#{clientRequestId},#{createdAt},#{updatedAt})
+  </insert>
+  <update id="save">
+    UPDATE purchase_proposals SET participation_type=#{participationType},approval_mode=#{approvalMode},publication_scope=#{publicationScope},group_id=#{groupId},item_name=#{itemName},poll_question=#{pollQuestion},amount=#{amount},currency=#{currency},purchase_reason=#{purchaseReason},alternative_product_tip=#{alternativeProductTip},settlement_mode=#{settlementMode},minimum_voter_count=#{minimumVoterCount},updated_at=#{updatedAt} WHERE id=#{id}
+  </update>
+  <insert id="insertVote" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO decision_votes(proposal_id,voter_user_id,vote_type,choice,option_id,reason,reputation_score_snapshot,weight_snapshot,client_request_id,cast_at)
+    VALUES(#{proposalId},#{voterUserId},#{voteType},#{choice},#{optionId},#{reason},#{reputationScoreSnapshot},#{weightSnapshot},#{clientRequestId},#{castAt})
+  </insert>
+  <select id="summary" resultType="com.hku.money.plaza.dto.PlazaResponses$Proposal">
+    SELECT <include refid="com.hku.money.plaza.mapper.PlazaMapper.proposalColumns"/>
+    FROM purchase_proposals p JOIN users u ON u.id=p.creator_user_id WHERE p.id=#{id}
+  </select>
+  <sql id="groupFilter">p.group_id=#{groupId} AND p.publication_scope='GROUP' AND p.proposal_status IN ('OPEN','SETTLED','INSUFFICIENT_PARTICIPATION')
+    <if test="status != null">AND p.proposal_status=#{status}</if>
+  </sql>
+  <select id="groupFeed" resultType="com.hku.money.plaza.dto.PlazaResponses$Proposal">
+    SELECT <include refid="com.hku.money.plaza.mapper.PlazaMapper.proposalColumns"/>
+    FROM purchase_proposals p JOIN users u ON u.id=p.creator_user_id WHERE <include refid="groupFilter"/>
+    ORDER BY p.published_at DESC,p.id DESC LIMIT #{size} OFFSET #{offset}
+  </select>
+  <select id="groupFeedCount" resultType="long">SELECT COUNT(*) FROM purchase_proposals p WHERE <include refid="groupFilter"/></select>
+</mapper>

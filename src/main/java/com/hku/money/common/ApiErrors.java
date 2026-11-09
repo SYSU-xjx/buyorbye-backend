@@ -43,7 +43,7 @@ public class ApiErrors {
 
   @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
   ResponseEntity<Result<Void>> tooLarge(Exception e) {
-    return error(413, "头像图片不得超过5MB，请求不得超过6MB");
+    return error(413, "图片不得超过5MB，请求不得超过6MB");
   }
 
   @ExceptionHandler(org.springframework.web.multipart.MultipartException.class)
@@ -53,7 +53,7 @@ public class ApiErrors {
 
   @ExceptionHandler(DataIntegrityViolationException.class)
   ResponseEntity<Result<Void>> conflict(Exception e) {
-    return error(409, "数据冲突，请检查用户名或重试");
+    return error(409, "数据冲突，请检查请求或重试");
   }
 
   @ExceptionHandler(AccessDeniedException.class)

@@ -151,3 +151,13 @@ The shared [system design](DESIGN.md) defines the candidate data model and confi
 - Never edit a migration already merged to `main`; add a new one instead.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Group and proposal lifecycle APIs
+
+Groups, drafts, publishing/withdrawal, SINGLE/MULTI voting, TIME/QUORUM settlement,
+reputation rewards, private proposal images, and asynchronous ECB/HKD conversion are
+implemented on the existing V1–V3 schema. No new migration is needed.
+See [the API contract and examples](docs/API-group-proposal.md) for request bodies,
+permissions, retry behavior, environment options, and Android integration notes.
+The existing plaza interaction module remains plaza-only; group interaction integration
+is a separate handoff. No Android demo screens are changed by this backend work.

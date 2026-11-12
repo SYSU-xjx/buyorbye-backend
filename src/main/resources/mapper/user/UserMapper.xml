@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hku.money.user.mapper.UserMapper">
+ <update id="updateProfile">UPDATE users
+ <set>
+  <if test="displayName != null">display_name=#{displayName},</if>
+  <if test="avatarUrl != null">avatar_url=#{avatarUrl},</if>
+  <if test="preferredCurrency != null">preferred_currency=#{preferredCurrency},</if>
+ </set> WHERE id=#{id}</update>
+ <insert id="ensureStreak">INSERT INTO user_streaks(user_id) VALUES(#{id}) ON DUPLICATE KEY UPDATE user_id=user_id</insert>
+ <select id="streak" resultType="com.hku.money.user.entity.Streak">SELECT * FROM user_streaks WHERE user_id=#{id}</select>
+ <select id="lockStreak" resultType="com.hku.money.user.entity.Streak">SELECT * FROM user_streaks WHERE user_id=#{id} FOR UPDATE</select>
+ <update id="updateStreak">UPDATE user_streaks SET current_days=#{streak.currentDays},longest_days=#{streak.longestDays},last_counted_date=#{streak.lastCountedDate} WHERE user_id=#{id}</update>
+ <select id="score" resultType="int">SELECT COALESCE((SELECT score FROM reputation_accounts WHERE user_id=#{id}),0)</select>
+ <select id="statistics" resultType="map">
+ SELECT
+ (SELECT COUNT(*) FROM purchase_proposals WHERE creator_user_id=#{id} AND proposal_status &lt;&gt; 'DRAFT') AS submittedCount,
+ (SELECT COUNT(DISTINCT proposal_id) FROM decision_votes WHERE voter_user_id=#{id}) AS votedCount,
+ (SELECT COUNT(*) FROM proposal_watches WHERE user_id=#{id}) AS watchedCount,
+ (SELECT COUNT(*) FROM proposal_comments c JOIN purchase_proposals p ON p.id=c.proposal_id WHERE p.creator_user_id=#{id} AND c.author_user_id &lt;&gt; #{id} AND c.comment_status='VISIBLE') AS receivedCommentCount,
+ (SELECT COUNT(*) FROM flowers WHERE receiver_user_id=#{id}) AS receivedFlowerCount
+ </select>
+ <select id="ledger" resultType="map">SELECT CAST(id AS CHAR) AS id,CAST(proposal_id AS CHAR) AS proposalId,score_change AS scoreChange,source_type AS sourceType,rule_version AS ruleVersion,DATE_FORMAT(created_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS createdAt FROM reputation_ledger WHERE user_id=#{id} ORDER BY created_at DESC,id DESC LIMIT #{size} OFFSET #{offset}</select>
+ <select id="ledgerCount" resultType="long">SELECT COUNT(*) FROM reputation_ledger WHERE user_id=#{id}</select>
+ <sql id="recordFilter">
+ <choose>
+ <when test="type == 'SUBMITTED'">p.creator_user_id=#{id}</when>
+ <when test="type == 'VOTED'">EXISTS(SELECT 1 FROM decision_votes v WHERE v.proposal_id=p.id AND v.voter_user_id=#{id}) AND p.proposal_status &lt;&gt; 'DRAFT'</when>
+ <otherwise>EXISTS(SELECT 1 FROM proposal_watches w WHERE w.proposal_id=p.id AND w.user_id=#{id}) AND p.proposal_status &lt;&gt; 'DRAFT'</otherwise>
+ </choose>
+ <if test="type != 'SUBMITTED'">
+ AND (p.publication_scope='PLAZA' OR p.creator_user_id=#{id} OR EXISTS(SELECT 1 FROM group_members g WHERE g.group_id=p.group_id AND g.user_id=#{id} AND g.member_status='ACTIVE'))
+ </if>
+ <if test="status != null">AND p.proposal_status=#{status}</if>
+ </sql>
+ <select id="records" resultType="map">SELECT CAST(p.id AS CHAR) AS id,p.item_name AS itemName,p.poll_question AS pollQuestion,p.proposal_status AS status,p.publication_scope AS scope,p.amount,p.currency,
+ CASE p.decision_result WHEN 1 THEN 'BUY' WHEN 0 THEN 'NOT_BUY' END AS decisionResult,
+ DATE_FORMAT(p.created_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS createdAt
+ FROM purchase_proposals p WHERE <include refid="recordFilter"/> ORDER BY p.created_at DESC,p.id DESC LIMIT #{size} OFFSET #{offset}</select>
+ <select id="recordsCount" resultType="long">SELECT COUNT(*) FROM purchase_proposals p WHERE <include refid="recordFilter"/></select>
+</mapper>

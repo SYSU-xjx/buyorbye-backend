@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hku.money.ranking.mapper.RankingMapper">
+ <sql id="ranked">
+ WITH metrics AS (
+ <choose>
+ <when test="type == 'TOP_JUDGE'">
+ SELECT v.voter_user_id AS user_id,COUNT(DISTINCT v.proposal_id) AS metric_value
+ FROM decision_votes v JOIN purchase_proposals p ON p.id=v.proposal_id
+ WHERE v.cast_at &gt;= #{start} AND v.cast_at &lt; #{end}
+ AND p.proposal_status NOT IN ('DRAFT','WITHDRAWN') AND v.voter_user_id &lt;&gt; p.creator_user_id
+ GROUP BY v.voter_user_id
+ </when>
+ <when test="type == 'HIGHEST_APPROVED_AMOUNT'">
+ SELECT p.creator_user_id AS user_id,SUM(e.converted_amount) AS metric_value
+ FROM purchase_proposals p JOIN exchange_rate_snapshots e ON e.proposal_id=p.id AND e.target_currency='HKD'
+ WHERE p.proposal_status='SETTLED' AND p.participation_type='APPROVE_REJECT' AND p.decision_result=1
+ AND p.settled_at &gt;= #{start} AND p.settled_at &lt; #{end}
+ GROUP BY p.creator_user_id
+ </when>
+ <otherwise>
+ SELECT p.creator_user_id AS user_id,COUNT(*) AS metric_value
+ FROM purchase_proposals p WHERE p.proposal_status='SETTLED' AND p.participation_type='APPROVE_REJECT' AND p.decision_result=0
+ AND p.settled_at &gt;= #{start} AND p.settled_at &lt; #{end}
+ GROUP BY p.creator_user_id
+ </otherwise>
+ </choose>
+ ), ranked AS (
+ SELECT ROW_NUMBER() OVER(ORDER BY m.metric_value DESC,m.user_id ASC) AS rank_no,
+ m.user_id,u.public_no,u.display_name,u.avatar_url,m.metric_value
+ FROM metrics m JOIN users u ON u.id=m.user_id WHERE u.account_status='ACTIVE'
+ )
+ </sql>
+ <sql id="columns">rank_no,CAST(user_id AS CHAR) AS user_id,CAST(public_no AS CHAR) AS public_no,display_name,avatar_url,metric_value</sql>
+ <select id="entries" resultType="com.hku.money.ranking.dto.RankingEntry">
+ <include refid="ranked"/> SELECT <include refid="columns"/> FROM ranked ORDER BY rank_no LIMIT #{size} OFFSET #{offset}
+ </select>
+ <select id="me" resultType="com.hku.money.ranking.dto.RankingEntry">
+ <include refid="ranked"/> SELECT <include refid="columns"/> FROM ranked WHERE user_id=#{userId}
+ </select>
+ <select id="count" resultType="long"><include refid="ranked"/> SELECT COUNT(*) FROM ranked</select>
+</mapper>

@@ -31,3 +31,13 @@ target/
 
 ### Mac OS ###
 .DS_Store
+
+### Local development artifacts (keep outside commits) ###
+/.idea/
+*.iml
+/output/
+/tmp/
+/uploads/
+/docs/API-user-wheel-ranking.md
+/docs/开发大纲与实施计划.md
+/用户转盘榜单功能接口清单.txt

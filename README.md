@@ -1,6 +1,6 @@
 # buy or bye Backend
 
-Spring Boot REST API for Buy or Bye purchase proposals, reasoned `BUY` / `NOT_BUY` votes, and weekly rankings, backed by MySQL.
+Spring Boot REST API for Buy or Bye purchase proposals, reasoned `BUY` / `NOT_BUY` votes, and natural daily/weekly/monthly rankings, backed by MySQL.
 
 ## Requirements
 
@@ -76,17 +76,66 @@ Windows PowerShell:
 ./mvnw.cmd spring-boot:run
 ```
 
+If your Windows default Java version is different, use the helper below. It selects JDK 17
+from `JAVA_HOME` or your user `.jdks` directory, waits for the Docker MySQL health check,
+and starts the backend without changing your global Java settings:
+
+```powershell
+.\scripts\dev.ps1
+# Or provide a JDK 17 installation explicitly:
+.\scripts\dev.ps1 -JdkHome 'C:\path\to\jdk-17'
+# Build and verify with the same Java selection:
+.\scripts\dev.ps1 -Action verify
+```
+
 From Android Studio or IntelliJ IDEA, open this backend project, select JDK 17, and run `com.hku.money.MoneyBackApplication`. Set the run configuration's working directory to the `buyorbye-backend` project root so the application can find `.env`.
 
-Verify startup at `http://localhost:8080/actuator/health`; the API documentation is at `http://localhost:8080/swagger-ui/index.html`. If prompted to sign in, use the temporary Spring Security username `user` and the password printed as `Using generated security password:` in the application startup log. This password changes on restart. The `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` values in `.env` are for MySQL, not Swagger UI. Stop the backend with `Ctrl+C` in the terminal or the IDE Stop button.
+Verify startup at `http://localhost:8080/actuator/health`; the API documentation is at `http://localhost:8080/swagger-ui/index.html`. Register and log in through `/api/auth`, then use the returned Bearer token with Swagger's Authorize button. MySQL credentials are not API credentials. Stop the backend with `Ctrl+C` in the terminal or the IDE Stop button.
+
+User, authentication, check-in, wheel decisions and natural day/week/month rankings are implemented with MyBatis XML. Rankings are recomputed for current or historical periods; legacy weekly snapshot tables are unused. JPA/Hibernate remains available for other modules.
+
+Business responses use `{ "code": 200, "message": "操作成功", "data": ... }`, with numeric
+codes matching HTTP status (registration returns 201). Register/login/refresh use `/api/auth`;
+personal APIs use `/api/users/me`, including `POST /check-in` for one check-in per Hong Kong
+calendar day. A missed full day resets the current streak; the longest streak is retained.
+The proposal creator can call `POST /api/purchase-proposals/{id}/wheel/spin` for an integer
+`data` of 1 (buy), 2 (do not buy), or 3 (wait until tomorrow), without changing the proposal.
+Rankings use `GET /api/rankings` and `/api/rankings/me` with `type=MOST_REJECTED`,
+`HIGHEST_APPROVED_AMOUNT`, or `TOP_JUDGE`, `period=DAY|WEEK|MONTH`, optional `date=YYYY-MM-DD`,
+and list pagination `page=1&size=20` (maximum size 100). Historical dates select their natural
+period. Votes count once per voter/proposal per period by vote time, including cross-period changes.
+
+### Avatar upload
+
+`POST /api/users/me/avatar` requires a Bearer token and `multipart/form-data` with a `file`
+part. It saves the image and updates the current user's avatar in one operation, returning
+`{ "code": 200, "message": "操作成功", "data": { "avatarUrl": "http://host/uploads/avatars/random.png" } }`.
+There is no need to call the profile PATCH afterward. Images are decoded and re-encoded;
+only PNG/JPEG up to 5MB and 4096 x 4096 pixels are accepted. Invalid files return 400,
+unsupported image formats 415, and oversized uploads 413. File names/MIME types supplied
+by the client are not trusted. `GET /uploads/avatars/{filename}` serves image bytes publicly
+so Android image loaders can display profiles and ranking entries.
+
+Files live under `./uploads/avatars` by default, outside the JAR and excluded from Git.
+`AVATAR_STORAGE_DIR` can select a persistent directory. `AVATAR_PUBLIC_BASE_URL` can set the
+externally reachable backend base URL (including any application context path); if empty,
+the request's scheme/host/context are used. For Android emulator access, use an API base URL
+such as `http://10.0.2.2:8080`; a physical phone needs an address reachable from that phone.
+Use the public base setting behind a reverse proxy. Keep this directory persistent when
+deploying; this is local storage, not object storage. Replacing an avatar retains the old
+file, while a rolled-back upload removes its newly created file.
+
+Run `./mvnw -B verify` (JDK 17 and Docker required) for unit and isolated MySQL 8.4 integration
+tests. Tests use disposable containers, not the development database. Generated logs, reports,
+PDFs and local working notes are excluded from commits.
 
 The Android emulator reaches the service at `http://10.0.2.2:8080`. Never commit `.env`, credentials, tokens, or production data.
 
 ## Project setup
 
 - Java 17, Spring Boot 3.5.5, Maven Wrapper
-- Modular monolith, MySQL 8.4 LTS, Spring Data JPA and Flyway
-- Spring Security, BCrypt and JWT dependencies are selected for authentication work
+- Modular monolith, MySQL 8.4 LTS, MyBatis XML, Spring Data JPA and Flyway
+- Spring Security with BCrypt passwords, JWT access tokens and revocable refresh-token sessions
 - Hibernate uses `ddl-auto=validate`; all schema changes belong in versioned Flyway migrations
 - OpenAPI UI is available at `/swagger-ui/index.html`
 

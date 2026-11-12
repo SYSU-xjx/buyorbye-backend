@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hku.money.plaza.mapper.PlazaMapper">
+  <sql id="visibleProposal">
+    p.publication_scope = 'PLAZA'
+    AND p.proposal_status IN ('OPEN', 'SETTLED', 'INSUFFICIENT_PARTICIPATION')
+    AND p.published_at IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM purchase_proposal_channels pc
+      JOIN channels c ON c.id = pc.channel_id AND c.is_active = 1
+      WHERE pc.proposal_id = p.id
+    )
+  </sql>
+
+  <sql id="proposalColumns">
+    p.id, COALESCE(p.item_name, p.poll_question) AS title,
+    CASE p.participation_type WHEN 'APPROVE_REJECT' THEN 'BINARY'
+      WHEN 'OPTION_VOTE' THEN 'OPTION' END AS participation_type,
+    p.amount, p.currency, p.purchase_reason, p.alternative_product_tip,
+    p.proposal_status, p.published_at, p.deadline_at, p.minimum_voter_count,
+    p.voter_count, p.watch_count, p.comment_count,
+    EXISTS (SELECT 1 FROM proposal_watches w
+            WHERE w.proposal_id = p.id AND w.user_id = #{viewerId}) AS watching,
+    CASE p.decision_result WHEN 1 THEN 'BUY' WHEN 0 THEN 'NOT_BUY' END AS decision_result,
+    p.winning_option_id, u.display_name, u.avatar_url
+  </sql>
+
+  <sql id="feedFilter">
+    <include refid="visibleProposal"/>
+    <if test="filter.mine or filter.channelId != null">
+      AND EXISTS (
+        SELECT 1 FROM purchase_proposal_channels pc
+        JOIN channels c ON c.id = pc.channel_id AND c.is_active = 1
+        <if test="filter.mine">
+          JOIN user_channels uc ON uc.channel_id = c.id AND uc.user_id = #{filter.viewerId}
+        </if>
+        WHERE pc.proposal_id = p.id
+        <if test="filter.channelId != null">AND c.id = #{filter.channelId}</if>
+      )
+    </if>
+    <if test="filter.tagId != null">
+      AND EXISTS (
+        SELECT 1 FROM proposal_tags pt
+        JOIN tags t ON t.id = pt.tag_id AND t.is_active = 1
+        WHERE pt.proposal_id = p.id AND t.id = #{filter.tagId}
+      )
+    </if>
+  </sql>
+
+  <select id="feed" resultType="com.hku.money.plaza.dto.PlazaResponses$Proposal">
+    <bind name="viewerId" value="filter.viewerId"/>
+    SELECT <include refid="proposalColumns"/>
+    FROM purchase_proposals p JOIN users u ON u.id = p.creator_user_id
+    WHERE <include refid="feedFilter"/>
+    ORDER BY p.published_at DESC, p.id DESC
+    LIMIT #{size} OFFSET #{offset}
+  </select>
+
+  <select id="feedCount" resultType="long">
+    SELECT COUNT(*) FROM purchase_proposals p
+    WHERE <include refid="feedFilter"/>
+  </select>
+
+  <select id="random" resultType="com.hku.money.plaza.dto.PlazaResponses$Proposal">
+    <bind name="viewerId" value="filter.viewerId"/>
+    SELECT <include refid="proposalColumns"/>
+    FROM purchase_proposals p JOIN users u ON u.id = p.creator_user_id
+    WHERE <include refid="feedFilter"/>
+    <if test="excludeId != null">AND p.id &lt;&gt; #{excludeId}</if>
+    ORDER BY RAND()
+    LIMIT 1
+  </select>
+
+  <select id="detail" resultType="com.hku.money.plaza.dto.PlazaResponses$Proposal">
+    SELECT <include refid="proposalColumns"/>
+    FROM purchase_proposals p JOIN users u ON u.id = p.creator_user_id
+    WHERE p.id = #{proposalId} AND <include refid="visibleProposal"/>
+  </select>
+
+  <sql id="channelColumns">
+    c.id, c.slug, c.name, c.description, uc.user_id IS NOT NULL AS subscribed
+  </sql>
+
+  <select id="channels" resultType="com.hku.money.plaza.dto.PlazaResponses$Channel">
+    SELECT <include refid="channelColumns"/>
+    FROM channels c
+    LEFT JOIN user_channels uc ON uc.channel_id = c.id AND uc.user_id = #{viewerId}
+    WHERE c.is_active = 1
+    <if test="mine">AND uc.user_id IS NOT NULL</if>
+    ORDER BY uc.sort_order, c.id
+  </select>
+
+  <select id="lockActiveChannels" resultType="long">
+    SELECT id FROM channels WHERE is_active = 1 AND id IN
+    <foreach collection="channelIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+    FOR SHARE
+  </select>
+
+  <delete id="removeSubscriptions">
+    DELETE FROM user_channels WHERE user_id = #{viewerId}
+    <if test="!channelIds.isEmpty()">
+      AND channel_id NOT IN
+      <foreach collection="channelIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+  </delete>
+
+  <insert id="saveSubscriptions">
+    INSERT INTO user_channels (user_id, channel_id, sort_order) VALUES
+    <foreach collection="channelIds" item="id" index="position" separator=",">
+      (#{viewerId}, #{id}, #{position})
+    </foreach>
+    AS incoming
+    ON DUPLICATE KEY UPDATE sort_order = incoming.sort_order
+  </insert>
+
+  <select id="tags" resultType="com.hku.money.plaza.dto.PlazaResponses$Tag">
+    SELECT id, slug, name FROM tags WHERE is_active = 1 ORDER BY display_order, id
+  </select>
+
+  <select id="proposalChannels" resultType="com.hku.money.plaza.dto.PlazaResponses$Channel">
+    SELECT <include refid="channelColumns"/>
+    FROM purchase_proposal_channels pc
+    JOIN channels c ON c.id = pc.channel_id
+    LEFT JOIN user_channels uc ON uc.channel_id = c.id AND uc.user_id = #{viewerId}
+    WHERE pc.proposal_id = #{proposalId} AND c.is_active = 1
+    ORDER BY c.id
+  </select>
+
+  <select id="proposalTags" resultType="com.hku.money.plaza.dto.PlazaResponses$Tag">
+    SELECT t.id, t.slug, t.name FROM proposal_tags pt JOIN tags t ON t.id = pt.tag_id
+    WHERE pt.proposal_id = #{proposalId} AND t.is_active = 1 ORDER BY t.display_order, t.id
+  </select>
+
+  <select id="proposalImages" resultType="string">
+    SELECT image_url FROM purchase_proposal_images
+    WHERE proposal_id = #{proposalId} ORDER BY display_order
+  </select>
+
+  <select id="proposalOptions" resultType="com.hku.money.plaza.dto.PlazaResponses$Option">
+    SELECT id, option_label, option_text, option_amount FROM poll_options
+    WHERE proposal_id = #{proposalId} ORDER BY display_order
+  </select>
+
+  <select id="visibleProposalAuthor" resultType="long">
+    SELECT p.creator_user_id FROM purchase_proposals p
+    WHERE p.id = #{proposalId} AND <include refid="visibleProposal"/>
+    <if test="lock">FOR UPDATE</if>
+  </select>
+
+  <sql id="voteReasonColumns">
+    v.vote_type, CASE v.choice WHEN 1 THEN 'BUY' WHEN 0 THEN 'NOT_BUY' END AS choice,
+    v.option_id, v.reason, u.display_name, u.avatar_url,
+    v.voter_user_id = #{viewerId} AS owned_by_viewer, v.cast_at
+  </sql>
+
+  <sql id="latestVotes">
+    (
+      SELECT MAX(id) AS id FROM decision_votes
+      WHERE proposal_id = #{proposalId}
+      GROUP BY voter_user_id
+    ) latest
+    JOIN decision_votes v ON v.id = latest.id
+  </sql>
+
+  <select id="voteReasons" resultType="com.hku.money.plaza.dto.PlazaResponses$VoteReason">
+    SELECT <include refid="voteReasonColumns"/>
+    FROM <include refid="latestVotes"/>
+    JOIN users u ON u.id = v.voter_user_id
+    ORDER BY v.cast_at DESC, v.id DESC
+    LIMIT #{size} OFFSET #{offset}
+  </select>
+
+  <select id="voteTally" resultType="com.hku.money.plaza.dto.PlazaResponses$VoteTally">
+    SELECT CASE v.choice WHEN 1 THEN 'BUY' WHEN 0 THEN 'NOT_BUY' END AS choice,
+           v.option_id, COUNT(*) AS vote_count
+    FROM <include refid="latestVotes"/>
+    GROUP BY v.choice, v.option_id
+    ORDER BY v.choice DESC, v.option_id
+  </select>
+
+  <select id="voteReasonCount" resultType="long">
+    SELECT COUNT(DISTINCT voter_user_id) FROM decision_votes WHERE proposal_id = #{proposalId}
+  </select>
+
+  <select id="latestViewerVote" resultType="com.hku.money.plaza.dto.PlazaResponses$VoteReason">
+    SELECT <include refid="voteReasonColumns"/>
+    FROM decision_votes v JOIN users u ON u.id = v.voter_user_id
+    WHERE v.proposal_id = #{proposalId} AND v.voter_user_id = #{viewerId}
+    ORDER BY v.id DESC
+    LIMIT 1
+  </select>
+
+  <select id="flowers" resultType="com.hku.money.plaza.dto.PlazaResponses$Flower">
+    SELECT COALESCE(MAX(giver_user_id = #{viewerId}), 0) AS sent, COUNT(*) AS flower_count
+    FROM flowers WHERE proposal_id = #{proposalId}
+  </select>
+
+  <insert id="insertFlower">
+    INSERT INTO flowers (proposal_id, giver_user_id, receiver_user_id)
+    VALUES (#{proposalId}, #{viewerId}, #{receiverId})
+  </insert>
+
+  <select id="updates" resultType="com.hku.money.plaza.dto.PlazaResponses$AuthorUpdate">
+    SELECT id, content, created_at FROM proposal_updates
+    WHERE proposal_id = #{proposalId}
+    ORDER BY created_at, id
+    LIMIT #{size} OFFSET #{offset}
+  </select>
+
+  <select id="updateCount" resultType="long">
+    SELECT COUNT(*) FROM proposal_updates WHERE proposal_id = #{proposalId}
+  </select>
+
+  <insert id="insertUpdate" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO proposal_updates (proposal_id, content) VALUES (#{proposalId}, #{content})
+  </insert>
+
+  <select id="updateById" resultType="com.hku.money.plaza.dto.PlazaResponses$AuthorUpdate">
+    SELECT id, content, created_at FROM proposal_updates WHERE id = #{id}
+  </select>
+
+  <select id="isWatching" resultType="boolean">
+    SELECT EXISTS (SELECT 1 FROM proposal_watches WHERE proposal_id = #{proposalId} AND user_id = #{viewerId})
+  </select>
+
+  <insert id="insertWatch">
+    INSERT INTO proposal_watches (proposal_id, user_id) VALUES (#{proposalId}, #{viewerId})
+  </insert>
+
+  <delete id="deleteWatch">
+    DELETE FROM proposal_watches WHERE proposal_id = #{proposalId} AND user_id = #{viewerId}
+  </delete>
+
+  <update id="changeWatchCount">
+    UPDATE purchase_proposals SET watch_count = watch_count + #{delta} WHERE id = #{proposalId}
+  </update>
+
+  <select id="watchCount" resultType="int">
+    SELECT watch_count FROM purchase_proposals WHERE id = #{proposalId}
+  </select>
+
+  <sql id="commentColumns">
+    c.id, c.parent_comment_id,
+    IF(c.comment_status = 'VISIBLE', u.display_name, NULL) AS author_name,
+    IF(c.comment_status = 'VISIBLE', u.avatar_url, NULL) AS author_avatar_url,
+    IF(c.comment_status = 'VISIBLE', c.content, NULL) AS content,
+    c.comment_status = 'DELETED' AS deleted,
+    c.comment_status = 'VISIBLE' AND c.author_user_id = #{viewerId} AS owned_by_viewer,
+    c.created_at
+  </sql>
+
+  <sql id="commentListFilter">
+    c.proposal_id = #{proposalId}
+    AND (
+      (c.comment_status = 'VISIBLE' AND (c.parent_comment_id IS NULL OR EXISTS (
+        SELECT 1 FROM proposal_comments parent
+        WHERE parent.id = c.parent_comment_id AND parent.proposal_id = c.proposal_id
+          AND parent.comment_status IN ('VISIBLE', 'DELETED')
+      )))
+      OR (c.comment_status = 'DELETED' AND c.parent_comment_id IS NULL AND EXISTS (
+        SELECT 1 FROM proposal_comments reply
+        WHERE reply.parent_comment_id = c.id AND reply.proposal_id = c.proposal_id
+          AND reply.comment_status = 'VISIBLE'
+      ))
+    )
+  </sql>
+
+  <select id="comments" resultType="com.hku.money.plaza.dto.PlazaResponses$Comment">
+    SELECT <include refid="commentColumns"/>
+    FROM proposal_comments c JOIN users u ON u.id = c.author_user_id
+    WHERE <include refid="commentListFilter"/>
+    ORDER BY c.created_at, c.id
+    LIMIT #{size} OFFSET #{offset}
+  </select>
+
+  <select id="commentListCount" resultType="long">
+    SELECT COUNT(*) FROM proposal_comments c WHERE <include refid="commentListFilter"/>
+  </select>
+
+  <select id="commentState" resultType="com.hku.money.plaza.mapper.PlazaMapper$CommentState">
+    SELECT author_user_id, parent_comment_id, comment_status FROM proposal_comments
+    WHERE proposal_id = #{proposalId} AND id = #{commentId}
+  </select>
+
+  <insert id="insertComment" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO proposal_comments (proposal_id, author_user_id, parent_comment_id, content)
+    VALUES (#{proposalId}, #{authorId}, #{parentId}, #{content})
+  </insert>
+
+  <select id="comment" resultType="com.hku.money.plaza.dto.PlazaResponses$Comment">
+    SELECT <include refid="commentColumns"/>
+    FROM proposal_comments c JOIN users u ON u.id = c.author_user_id
+    WHERE c.id = #{commentId}
+  </select>
+
+  <update id="deleteComment">
+    UPDATE proposal_comments SET comment_status = 'DELETED' WHERE id = #{commentId}
+  </update>
+
+  <update id="changeCommentCount">
+    UPDATE purchase_proposals SET comment_count = comment_count + #{delta} WHERE id = #{proposalId}
+  </update>
+</mapper>

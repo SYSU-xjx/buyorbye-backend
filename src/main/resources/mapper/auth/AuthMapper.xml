@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hku.money.auth.mapper.AuthMapper">
+  <select id="byUsername" resultType="com.hku.money.auth.entity.Account">SELECT * FROM users WHERE username=#{username}</select>
+  <select id="byId" resultType="com.hku.money.auth.entity.Account">SELECT * FROM users WHERE id=#{id}</select>
+  <select id="lockUser" resultType="com.hku.money.auth.entity.Account">SELECT * FROM users WHERE id=#{id} FOR UPDATE</select>
+  <insert id="insertUser" useGeneratedKeys="true" keyProperty="id">INSERT INTO users(username,password_hash,display_name,public_no,preferred_currency) VALUES(#{username},#{passwordHash},#{displayName},#{publicNo},'CNY')</insert>
+  <insert id="initReputation">INSERT INTO reputation_accounts(user_id) VALUES(#{id})</insert>
+  <insert id="initStreak">INSERT INTO user_streaks(user_id) VALUES(#{id})</insert>
+  <insert id="insertSession" useGeneratedKeys="true" keyProperty="id">INSERT INTO auth_sessions(user_id,refresh_token_hash,device_id,expires_at) VALUES(#{userId},#{refreshTokenHash},#{deviceId},#{expiresAt})</insert>
+  <select id="byRefresh" resultType="com.hku.money.auth.entity.LoginSession">SELECT * FROM auth_sessions WHERE refresh_token_hash=#{hash}</select>
+  <select id="lockSession" resultType="com.hku.money.auth.entity.LoginSession">SELECT * FROM auth_sessions WHERE id=#{id} FOR UPDATE</select>
+  <select id="activeSession" resultType="com.hku.money.auth.entity.LoginSession">SELECT * FROM auth_sessions WHERE id=#{id} AND user_id=#{userId} AND revoked_at IS NULL AND expires_at &gt; #{now}</select>
+  <update id="rotate">UPDATE auth_sessions SET refresh_token_hash=#{hash},last_used_at=#{now} WHERE id=#{id}</update>
+  <update id="revoke">UPDATE auth_sessions SET revoked_at=#{now} WHERE id=#{id}</update>
+  <update id="revokeAll">UPDATE auth_sessions SET revoked_at=#{now} WHERE user_id=#{userId} AND revoked_at IS NULL</update>
+  <update id="password">UPDATE users SET password_hash=#{hash} WHERE id=#{id}</update>
+  <update id="touch">UPDATE users SET last_active_at=#{now} WHERE id=#{id}</update>
+  <update id="anonymize">UPDATE users SET username=CONCAT('deleted_',id),display_name='已注销用户',avatar_url=NULL,public_no=NULL,password_hash=#{hash},account_status='ANONYMIZED',last_active_at=NULL WHERE id=#{id}</update>
+</mapper>

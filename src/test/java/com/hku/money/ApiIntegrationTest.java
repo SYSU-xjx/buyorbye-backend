@@ -57,6 +57,7 @@ class ApiIntegrationTest {
     r.add("spring.datasource.password", MYSQL::getPassword);
     r.add("app.jwt-secret", () -> "test-only-secret-at-least-32-bytes-not-for-production");
     r.add("app.avatar.storage-dir", AVATARS::toString);
+    r.add("app.proposal.jobs-enabled", () -> "false");
     r.add("app.avatar.public-base-url", () -> "");
   }
 

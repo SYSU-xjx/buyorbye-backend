@@ -148,7 +148,7 @@ Persist weekly ranking snapshots and their entries so historical rankings remain
 
 ## 8. Candidate Data Model
 
-This target model is based on `数据库设计文档.pdf` and contains 30 tables across eight business domains. It is a design baseline for team review, not a claim about the current database. The current Flyway migration `V1__initial_schema.sql` still contains the earlier 15-table baseline and does not implement this target model; update the migration separately after the team reviews and freezes the schema. Internal primary keys use auto-incrementing unsigned `BIGINT` unless a composite key is stated; APIs should expose identifiers as opaque values and must not rely on their sequence.
+This target model is based on `数据库设计文档.pdf` and contains 30 tables across eight business domains. It is a design baseline for team review, not a claim about the current database. The current Flyway migration `V1__initial_schema.sql` implements the 30-table baseline. Subsequent changes must use new migrations; the group/proposal implementation does not change the schema. Internal primary keys use auto-incrementing unsigned `BIGINT` unless a composite key is stated; APIs should expose identifiers as opaque values and must not rely on their sequence.
 
 ```mermaid
 erDiagram
@@ -318,7 +318,7 @@ If encounter `Permission denied`, execute:
 chmod +x gradlew
 ```
 
-The backend repository's `compose.yaml` starts MySQL only. The service runs through Maven, and Android runs through Android Studio or Gradle. Flyway applies `V1__initial_schema.sql` when the backend starts against a new database. That migration currently creates the earlier 15-table baseline; it must be reviewed and brought into line with the 30-table target model before business APIs rely on the target schema.
+The backend repository's `compose.yaml` starts MySQL only. The service runs through Maven, and Android runs through Android Studio or Gradle. Flyway applies `V1__initial_schema.sql` when the backend starts against a new database. That migration creates the 30-table baseline; V2 seeds reference data and V3 adds ranking query indexes.
 
 ## 12. Team Workflow and Responsibilities
 
@@ -380,3 +380,21 @@ The following items remain open for review and may require follow-up migrations 
 - Whether the optional `wheel_runs` table will be added for history or shared wheels
 
 No implementation should silently decide these items. Add the decision and update this document before changing the schema or public API.
+
+
+## 16. Group/proposal implementation decisions (2026-11-09)
+
+The accepted API contract is [docs/API-group-proposal.md](docs/API-group-proposal.md).
+It resolves earlier open decisions for this implementation:
+
+- Groups use eight-digit numeric invite strings, seven-day expiry, no icon field, and no friendships.
+- A closed group retains history. Open proposals are closed to new votes immediately and their future deadlines advance to the group-close time; the normal settlement path handles their existing votes.
+- All published proposals require 1–3 tags; plaza proposals additionally require an active channel. A proposal has one scope, never GROUP and PLAZA simultaneously.
+- SINGLE means the first eligible non-author vote settles immediately (QUORUM, threshold 1); no designated reviewer. MULTI supports TIME and QUORUM, both with a deadline fallback.
+- OPTION accepts 1–6 candidates without prices in this first implementation. Weighted ties choose the earliest display_order, producing one winning_option_id.
+- Vote events are append-only, use UUID retry keys, and freeze the current score/weight at each event. Settlement rewards only the correct latest event once with +1 and rule version v1.
+- Images use separate local storage, authenticated reads, PNG/JPEG up to 5MB, four images per proposal, and the existing decoder's 4096-pixel dimension cap.
+- Missing HKD rate snapshots do not block decisions. A separate bounded background worker fetches ECB historical rates or reuses saved earlier rates; existing snapshots are immutable.
+- Group interactions reuse the existing interaction routes after the interaction owner extends their plaza-only visibility checks. No duplicate interaction implementation is added here.
+
+Existing implementation differences in the user/ranking modules remain documented in their README sections; the proposal work reuses them rather than replacing their contracts.

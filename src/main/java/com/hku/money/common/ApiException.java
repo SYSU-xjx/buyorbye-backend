@@ -17,4 +17,12 @@ public class ApiException extends RuntimeException {
   public static ApiException unauthorized() {
     return new ApiException(401, "UNAUTHORIZED", "登录已失效，请重新登录");
   }
+
+  public static ApiException invalidCredentials() {
+    return new ApiException(401, "INVALID_CREDENTIALS", "用户名或密码错误");
+  }
+
+  public static ApiException wrongPassword() {
+    return new ApiException(400, "WRONG_PASSWORD", "原密码错误");
+  }
 }

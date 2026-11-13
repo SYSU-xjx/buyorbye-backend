@@ -76,12 +76,12 @@ public class AuthService {
     var found = mapper.byUsername(req.username().toLowerCase(Locale.ROOT));
     if (found == null) {
       encoder.matches(req.password(), dummy);
-      throw ApiException.unauthorized();
+      throw ApiException.invalidCredentials();
     }
     var user = mapper.lockUser(found.id);
     if (user == null
         || !"ACTIVE".equals(user.accountStatus)
-        || !encoder.matches(req.password(), user.passwordHash)) throw ApiException.unauthorized();
+        || !encoder.matches(req.password(), user.passwordHash)) throw ApiException.invalidCredentials();
     String raw = TokenService.random();
     var session = new LoginSession();
     session.userId = user.id;
@@ -122,7 +122,7 @@ public class AuthService {
     validatePassword(req.oldPassword());
     validatePassword(req.newPassword());
     var user = guard.lockActive(principal.userId());
-    if (!encoder.matches(req.oldPassword(), user.passwordHash)) throw ApiException.unauthorized();
+    if (!encoder.matches(req.oldPassword(), user.passwordHash)) throw ApiException.wrongPassword();
     mapper.password(user.id, encoder.encode(req.newPassword()));
     mapper.revokeAll(user.id, now());
   }

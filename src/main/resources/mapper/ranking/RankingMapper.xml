@@ -18,6 +18,14 @@
  AND p.settled_at &gt;= #{start} AND p.settled_at &lt; #{end}
  GROUP BY p.creator_user_id
  </when>
+ <when test="type == 'HIGHEST_SAVED_AMOUNT'">
+ SELECT p.creator_user_id AS user_id,SUM(p.amount) AS metric_value
+ FROM purchase_proposals p
+ WHERE p.proposal_status='SETTLED' AND p.participation_type='APPROVE_REJECT'
+ AND p.decision_result=0 AND p.currency='CNY'
+ AND p.settled_at &gt;= #{start} AND p.settled_at &lt; #{end}
+ GROUP BY p.creator_user_id
+ </when>
  <otherwise>
  SELECT p.creator_user_id AS user_id,COUNT(*) AS metric_value
  FROM purchase_proposals p WHERE p.proposal_status='SETTLED' AND p.participation_type='APPROVE_REJECT' AND p.decision_result=0

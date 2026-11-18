@@ -161,3 +161,18 @@ See [the API contract and examples](docs/API-group-proposal.md) for request bodi
 permissions, retry behavior, environment options, and Android integration notes.
 The existing plaza interaction module remains plaza-only; group interaction integration
 is a separate handoff. No Android demo screens are changed by this backend work.
+
+
+## Weekly savings leaderboard
+
+The Android Profile rankings also use type=HIGHEST_SAVED_AMOUNT with
+GET /api/rankings and GET /api/rankings/me. DAY, WEEK, MONTH and existing
+pagination parameters remain supported.
+
+This metric sums original CNY amounts from settled binary proposals whose result
+is NOT_BUY, grouped by creator and settlement period. The response unit is CNY.
+Other currencies and option votes are excluded. Existing ranking types and their
+units are preserved. No database migration is required.
+
+The Android companion implementation is on
+[fix/session-home-group](https://github.com/SYSU-xjx/buyorbye-android/tree/fix/session-home-group).

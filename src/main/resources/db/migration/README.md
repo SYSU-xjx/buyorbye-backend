@@ -10,6 +10,8 @@ MySQL `CREATE` privilege for this to work. See the repository README for account
 |---|---|
 | `V1__initial_schema.sql` | Full schema: 30 tables, 45 foreign keys, 34 `CHECK` constraints; minimum voter count defaults to 3 and every vote requires a reason |
 | `V2__seed_reference_data.sql` | Reference data: 16 content tags and 5 plaza channels |
+| `V4__seed_users.sql` | Test users for local data import |
+| `V5__translate_reference_data_to_english.sql` | Translates reference tag and channel labels to English while preserving IDs and slugs |
 
 Table-by-table documentation lives in [`docs/database/README.md`](../../../../../docs/database/README.md).
 

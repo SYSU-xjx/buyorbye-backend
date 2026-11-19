@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class RankingService {
   public enum Type {
     MOST_REJECTED,
+    HIGHEST_SAVED_AMOUNT,
     HIGHEST_APPROVED_AMOUNT,
     TOP_JUDGE
   }
@@ -75,6 +76,10 @@ public class RankingService {
   }
 
   private String unit(Type type) {
-    return type == Type.HIGHEST_APPROVED_AMOUNT ? "HKD" : "COUNT";
+    return switch (type) {
+      case HIGHEST_APPROVED_AMOUNT -> "HKD";
+      case HIGHEST_SAVED_AMOUNT -> "CNY";
+      default -> "COUNT";
+    };
   }
 }
